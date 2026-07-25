@@ -1,0 +1,25 @@
+{
+    "name": "shelf/orders",
+    "type": "project",
+    "description": "Order service",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^11.31"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.18"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
