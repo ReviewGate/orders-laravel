@@ -1,0 +1,117 @@
+# ReviewGate — review config for orders-laravel. Versioned through the pull request; the bot reads it on every run.
+version: 1
+language: en
+preset: laravel
+severity_gate: critical  # 🔴 critical blocks the merge (check run); warning/comment do not
+tests: optional
+
+# The review scheme is an ensemble: two independent generators from different vendors + an arbiter. Pricier than
+# the plain scheme, but it catches what one model misses; the arbiter collapses duplicates and judges the merged
+# list against the team's standards.
+llm:
+  model: claude-sonnet-5          # primary generator
+  extra_generators:               # ensemble: a second generator from another vendor (multi-vendor)
+    - backend: deepseek           # DeepSeek from the installation env — an independent view, cheap
+      model: deepseek-v4-pro
+  arbiter:                        # the arbiter — the strongest model rules on the merged findings
+    model: claude-opus-4-8
+
+  full_file_context: true         # full files plus imported neighbours, not only the diff
+  environment_context: true       # stack versions in the prompt
+
+diagnostics: true
+committable_suggestions: true
+
+cost:
+  show: true
+  currency: "$"
+  models:
+    claude-fable-5:    { input: 10, output: 50 }
+    claude-opus-4-8:   { input: 5,  output: 25 }
+    claude-sonnet-5:   { input: 3,  output: 15 }
+    claude-sonnet-4-6: { input: 3,  output: 15 }
+    claude-haiku-4-5:  { input: 1,  output: 5 }
+    deepseek-v4-pro:   { input: 0.5, output: 2 }
+
+reply:
+  enabled: true
+  max_replies_per_thread: 3
+
+integration_branches:
+  - main
+  - "release/**"
+
+# Team rules = only what Pint/PHPStan does NOT catch. The id lands in the finding's ruleId,
+# (ADR-XXX) points at our canon in docs/adr.
+rules:
+  # ── Layers ──
+  - id: controller-through-service
+    description: "The controller stays thin: request parsing, response codes. Business logic, work across several models and transactions belong in a service (app/Services), not in a controller action (ADR-001)."
+    severity: critical
+  - id: no-internal-fields-in-response
+    description: "The response goes out through an API Resource with an EXPLICIT field list. `response()->json($model)` and returning a model or collection directly are banned: internal fields (cost_price_cents, manager_note, cancellation_reason) must not leave the service — that is how a purchase price once leaked (ADR-007)."
+    severity: critical
+
+  # ── Queries and performance ──
+  - id: paginate-every-list
+    description: "Every list endpoint uses paginate() with an upper bound on per_page. `->get()` and `->all()` for lists that go out are banned regardless of how big the table is today (ADR-002)."
+    severity: critical
+  - id: no-queries-in-loop
+    description: "Touching a relation ($order->items) or running a query inside a loop over models is banned — Eloquent loads relations lazily and goes off into N+1. Use with()/load() or an SQL aggregate (ADR-002)."
+    severity: critical
+  - id: index-for-filtered-column
+    description: "A column filtered or sorted on by a new query must have an index created by a migration. Index name — idx_<table>_<columns> (ADR-002)."
+    severity: warning
+
+  # ── Money and schema ──
+  - id: money-in-minor-units
+    description: "Money is stored as whole cents (bigInteger) and travels through the API as an integer. Float is banned for money at every level (model, resource, response) (ADR-003)."
+    severity: critical
+  - id: schema-change-needs-migration
+    description: "A database schema change ships with a migration in the same pull request. A query against a column that does not exist passes review and fails on deploy (ADR-008)."
+    severity: critical
+
+  # ── Input and security ──
+  - id: validate-every-input
+    description: "The request body is validated by a FormRequest (or $request->validate). Direct access to $request->input()/all() without validation and mass assignment from unchecked data are not accepted. Query parameters that affect the selection are validated too (ADR-004)."
+    severity: critical
+  - id: no-raw-sql-interpolation
+    description: "User input is never concatenated into SQL (DB::raw(\"... {$value}\"), whereRaw with interpolation) — bound parameters only. This covers orderBy taken from a query parameter (ADR-004)."
+    severity: critical
+
+  # ── Lifecycle and external calls ──
+  - id: status-changes-via-domain-method
+    description: "The order status changes through a domain method of the model (changeStatus/markPaid) that checks whether the transition is allowed. `$order->status = ...` and update(['status' => ...]) outside the model are banned (ADR-005)."
+    severity: critical
+  - id: timeouts-on-external-calls
+    description: "Calls to external systems through the Http client run with an explicit ->timeout() (and preferably ->connectTimeout()). Http::post/get without a timeout are banned even if the service is 'always fast' (ADR-006)."
+    severity: warning
+  - id: log-context-on-failure
+    description: "When an external call fails or a transaction is rolled back, the order id and the reason go into the log. A swallowed exception without context is a defect (ADR-006)."
+    severity: warning
+
+  # ── Odds and ends ──
+  - id: magic-values-to-constants
+    description: "Magic numbers and strings (limits, timeouts, status codes, currency codes) belong in constants of the model or class — Order already has STATUS_* and CURRENCY_USD. Do not flag literal values in migrations and factories."
+    severity: comment
+
+dont_flag:
+  - "Missing Swagger/Scribe annotations on internal endpoints are normal, we document the public API only"
+  - "We deliberately do not use the Repository pattern on top of Eloquent — that is a conscious decision of the team"
+  - "dump/dd in seeders and local scripts is not a problem, it never reaches production"
+  - "No transaction in operations that change a single model is not a problem"
+
+ignore:
+  - "tests/**"
+  - "vendor/**"
+  - "storage/**"
+  - "bootstrap/cache/**"
+
+review_prompt:
+  mode: extend
+  text: |
+    This service takes orders and money, so look at these as well:
+    - Repeated calls: what happens if the same request arrives twice (a client retry, a duplicate webhook).
+    - Partial failure: an external system errors halfway through an operation — what state the order is left in.
+    - What exactly leaves the service in the response and in the logs.
+    Leave purely stylistic things and whatever Pint/PHPStan catches alone.
