@@ -5,19 +5,20 @@ preset: laravel
 severity_gate: critical  # 🔴 critical blocks the merge (check run); warning/comment do not
 tests: optional
 
-# The review scheme is an ensemble: two independent generators from different vendors + an arbiter. Pricier than
-# the plain scheme, but it catches what one model misses; the arbiter collapses duplicates and judges the merged
-# list against the team's standards.
+# Review schema (canon 2.0): roles of one shape — generators (the eyes) and a judge
+# panel that rules on the merged list. One judge here, at maximum effort: with a single
+# judge a finding has no split to resolve, so there is nothing for an arbiter to decide.
 llm:
-  model: claude-sonnet-5          # primary generator
-  extra_generators:               # ensemble: a second generator from another vendor (multi-vendor)
-    - backend: deepseek           # DeepSeek from the installation env — an independent view, cheap
+  generators:                     # the eyes; the first one is primary
+    - model: claude-sonnet-5
+    - backend: deepseek           # DeepSeek from the installation env — an independent view
       model: deepseek-v4-pro
-  arbiter:                        # the arbiter — the strongest model rules on the merged findings
-    model: claude-opus-4-8
-
+  judges:                         # one judge: rules on the merged list and collapses duplicates
+    - model: claude-opus-4-8
+      effort: max
   full_file_context: true         # full files plus imported neighbours, not only the diff
   environment_context: true       # stack versions in the prompt
+
 
 diagnostics: true
 committable_suggestions: true
